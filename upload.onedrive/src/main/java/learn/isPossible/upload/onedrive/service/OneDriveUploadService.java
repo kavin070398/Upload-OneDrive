@@ -24,7 +24,7 @@ public class OneDriveUploadService {
 
         // 1️⃣ Upload file to OneDrive
         DriveItem uploadedItem = graphClient
-                .users("kavin@gomobi.io")
+                .users("mobitest@gomobi.io")
                 .drive()
                 .root()
                 .itemWithPath(folderPath + "/" + file.getOriginalFilename())
@@ -41,7 +41,7 @@ public class OneDriveUploadService {
 
         // 3️⃣ Create sharing link
         Permission shareLink = graphClient
-                .users("kavin@gomobi.io")
+                .users("mobitest@gomobi.io")
                 .drive()
                 .items(uploadedItem.id)
                 .createLink(linkParams)
@@ -51,53 +51,74 @@ public class OneDriveUploadService {
         return shareLink.link.webUrl;
     }
 
-//    public String uploadAndShare(MultipartFile file, String folderPath) throws IOException {
-//
-//        byte[] bytes = file.getBytes();
-//
-//        // 1️⃣ Upload file
-//        DriveItem uploadedItem = graphClient
-//                .users("kavin@gomobi.io")
-//                .drive()
-//                .root()
-//                .itemWithPath(folderPath + "/" + file.getOriginalFilename())
-//                .content()
-//                .buildRequest()
-//                .put(bytes);
-//
-//        // 2️⃣ Generate a public (anonymous) sharing link
-//        var sharingLink = graphClient
-//                .users("kavin@gomobi.io")
-//                .drive()
-//                .items(uploadedItem.id)
-//                .createLink("view", "anonymous")   // "anonymous" = no login required
-//                .buildRequest()
-//                .post();
-//
-//        return sharingLink.link.webUrl;
-//    }
+    public String uploadLargeFile(MultipartFile file, String folderPath) throws Exception {
 
-    public String uploadSmallFile(MultipartFile file, String folderPath) throws IOException {
-
-        byte[] bytes = file.getBytes();
-
-//        DriveItem uploadedItem = graphClient
-//                .me()
-//                .drive()
-//                .root()
-//                .itemWithPath(folderPath + "/" + file.getOriginalFilename())
-//                .content()
-//                .buildRequest()
-//                .put(bytes);
-        DriveItem uploadedItem = graphClient
-                .users("kavin@gomobi.io")  // <<< IMPORTANT FIX
+        // 1. Create upload session
+        var uploadSession = graphClient
+                .users("kavin@gomobi.io")
                 .drive()
                 .root()
                 .itemWithPath(folderPath + "/" + file.getOriginalFilename())
-                .content()
+                .createUploadSession(null)
                 .buildRequest()
-                .put(bytes);
+                .post();
 
-        return uploadedItem.webUrl;
+        String uploadUrl = uploadSession.uploadUrl;
+        int chunkSize = 5 * 1024 * 1024; // 5MB
+        byte[] fileBytes = file.getBytes();
+
+        int totalSize = fileBytes.length;
+        int offset = 0;
+
+        okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
+
+        // 2. Upload chunks
+        while (offset < totalSize) {
+
+            int end = Math.min(offset + chunkSize, totalSize);
+            byte[] chunk = new byte[end - offset];
+            System.arraycopy(fileBytes, offset, chunk, 0, chunk.length);
+
+            okhttp3.Request request = new okhttp3.Request.Builder()
+                    .url(uploadUrl)
+                    .addHeader("Content-Length", String.valueOf(chunk.length))
+                    .addHeader("Content-Range",
+                            "bytes " + offset + "-" + (end - 1) + "/" + totalSize)
+                    .put(okhttp3.RequestBody.create(chunk))
+                    .build();
+
+            okhttp3.Response response = client.newCall(request).execute();
+
+            // Final chunk returns DriveItem
+            if (response.code() == 201 || response.code() == 200) {
+                String body = response.body().string();
+
+                // Parse final metadata returned by OneDrive
+                DriveItem uploadedItem =
+                        graphClient.getSerializer().deserializeObject(body, DriveItem.class);
+
+                // 3. Create share link
+                var linkParams = DriveItemCreateLinkParameterSet
+                        .newBuilder()
+                        .withType("view")
+                        .withScope("anonymous")
+                        .build();
+
+                Permission shareLink = graphClient
+                        .users("kavin@gomobi.io")
+                        .drive()
+                        .items(uploadedItem.id)
+                        .createLink(linkParams)
+                        .buildRequest()
+                        .post();
+
+                return shareLink.link.webUrl;
+            }
+
+            response.close();
+            offset = end;
+        }
+
+        throw new RuntimeException("Upload failed — no final response returned");
     }
 }

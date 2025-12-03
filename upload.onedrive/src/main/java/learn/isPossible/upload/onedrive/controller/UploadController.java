@@ -25,5 +25,15 @@ public class UploadController {
 
         return ResponseEntity.ok("Uploaded Successfully: " + url);
     }
+
+    @PostMapping("/upload/large")
+    public ResponseEntity<String> uploadLarge(
+            @RequestParam MultipartFile file,
+            @RequestParam String folderPath) throws Exception {
+
+        String url = service.uploadLargeFile(file, folderPath);
+
+        return ResponseEntity.ok("Large File Uploaded Successfully: " + url);
+    }
 }
 

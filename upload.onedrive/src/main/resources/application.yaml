@@ -1,6 +1,10 @@
 spring:
   application:
     name: upload-onedrive
+  servlet:
+    multipart:
+      max-file-size: -1
+      max-request-size: -1
 
 azure:
   tenant-id: ${AZURE_TENANT_ID}
